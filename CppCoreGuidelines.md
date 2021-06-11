@@ -4593,6 +4593,12 @@ They are not useful, and make types difficult to use by making them either uncop
         // ...
     };
 
+The `const` and `&` data members make this class "only-sort-of-copyable" -- copy-constructible but not copy-assignable.
+
+##### Note
+
+If you need a member to point to something, use a pointer (raw or smart, and `gsl::not_null` if it should not be null) instead of a reference.
+
 ##### Enforcement
 
 Flag a data member that is `const`, `&`, or `&&`.
@@ -4745,7 +4751,7 @@ into more expensive copies, or making a class move-only.
         // ...
     }
 
-Given that "special attention" was needed for the destructor (here, to deallocate), the likelihood that copy and move assignment (both will implicitly destroy an object) are correct is low (here, we would get double deletion).
+Given that "special attention" was needed for the destructor (here, to deallocate), the likelihood that the implicitly-defined copy and move assignment operators will be correct is low (here, we would get double deletion).
 
 ##### Note
 
@@ -8326,7 +8332,7 @@ The string returned by `ff()` is destroyed before the returned pointer into it c
 
 ##### Enforcement
 
-Flag all conversion operators.
+Flag all non-explicit conversion operators.
 
 ### <a name="Ro-custom"></a>C.165: Use `using` for customization points
 
@@ -11609,9 +11615,8 @@ C++17 tightens up the rules for the order of evaluation, but the order of evalua
     int i = 0;
     f(++i, ++i);
 
-The call will most likely be `f(0, 1)` or `f(1, 0)`, but you don't know which.
-Technically, the behavior is undefined.
-In C++17, this code does not have undefined behavior, but it is still not specified which argument is evaluated first.
+Before C++17, the behavior is undefined, so the behavior could be anything (e.g., `f(2, 2)`).
+Since C++17, this code does not have undefined behavior, but it is still not specified which argument is evaluated first. The call will be `f(1, 2)` or `f(2, 1)`, but you don't know which.
 
 ##### Example
 
@@ -20613,7 +20618,7 @@ and errors (when we didn't deal correctly with semi-constructed objects consiste
             : mx(check_size(x))
             , my(check_size(y))
             // now we know x and y have a valid size
-            , data(mx*my*sizeof(int)) // will throw std::bad_alloc on error
+            , data(mx * my) // will throw std::bad_alloc on error
         {
             // picture is ready-to-use
         }
