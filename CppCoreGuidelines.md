@@ -1,6 +1,6 @@
 # <a name="main"></a>C++ Core Guidelines
 
-June 17, 2021
+January 3, 2022
 
 
 Editors:
@@ -187,7 +187,7 @@ You can look at design concepts used to express the rules:
 
 This document is a set of guidelines for using C++ well.
 The aim of this document is to help people to use modern C++ effectively.
-By "modern C++" we mean effective use of the ISO C++ standard (currently C++17, but almost all of our recommendations also apply to C++14 and C++11).
+By "modern C++" we mean effective use of the ISO C++ standard (currently C++20, but almost all of our recommendations also apply to C++17, C++14 and C++11).
 In other words, what would you like your code to look like in 5 years' time, given that you can start now? In 10 years' time?
 
 The guidelines are focused on relatively high-level issues, such as interfaces, resource management, memory management, and concurrency.
@@ -224,7 +224,7 @@ We plan to modify and extend this document as our understanding improves and the
 
 # <a name="S-introduction"></a>In: Introduction
 
-This is a set of core guidelines for modern C++ (currently C++17) taking likely future enhancements and ISO Technical Specifications (TSs) into account.
+This is a set of core guidelines for modern C++ (currently C++20 and C++17) taking likely future enhancements and ISO Technical Specifications (TSs) into account.
 The aim is to help C++ programmers to write simpler, more efficient, more maintainable code.
 
 Introduction summary:
@@ -594,7 +594,7 @@ In such cases, control their (dis)use with an extension of these Coding Guidelin
 
 ##### Enforcement
 
-Use an up-to-date C++ compiler (currently C++17, C++14, or C++11) with a set of options that do not accept extensions.
+Use an up-to-date C++ compiler (currently C++20 or C++17) with a set of options that do not accept extensions.
 
 ### <a name="Rp-what"></a>P.3: Express intent
 
@@ -1766,7 +1766,7 @@ Use the C++20 style of requirements specification. For example:
 
 ##### Note
 
-Soon (in C++20), all compilers will be able to check `requires` clauses once the `//` is removed.
+Compilers that support C++20 are able to check `requires` clauses once the `//` is removed.
 Concepts are supported in GCC 6.1 and later.
 
 **See also**: [Generic programming](#SS-GP) and [concepts](#SS-concepts).
@@ -2820,10 +2820,10 @@ We can catch many common cases of dangling pointers statically (see [lifetime sa
 * Flag a parameter of a smart pointer type (a type that overloads `operator->` or `operator*`) that is copyable/movable but never copied/moved from in the function body, and that is never modified, and that is not passed along to another function that could do so. That means the ownership semantics are not used.
   Suggest using a `T*` or `T&` instead.
 
-**see also**:
+**See also**:
 
-* [prefer `t*` over `t&` when "no argument" is a valid option](#rf-ptr-ref)
-* [smart pointer rule summary](#rr-summary-smartptrs)
+* [Prefer `T*` over `T&` when "no argument" is a valid option](#Rf-ptr-ref)
+* [Smart pointer rule summary](#Rr-summary-smartptrs)
 
 ### <a name="Rf-pure"></a>F.8: Prefer pure functions
 
@@ -2849,11 +2849,23 @@ Suppression of unused parameter warnings.
 
 ##### Example
 
-    X* find(map<Blob>& m, const string& s, Hint);   // once upon a time, a hint was used
+    widget* find(const set<widget>& s, const widget& w, Hint);   // once upon a time, a hint was used
 
 ##### Note
 
 Allowing parameters to be unnamed was introduced in the early 1980 to address this problem.
+
+If parameters are conditionally unused, declare them with the `[[maybe_unused]]` attribute.
+For example:
+
+    template <typename Value>
+    Value* find(const set<Value>& s, const Value& v, [[maybe_unused]] Hint h)
+    {
+        if constexpr (sizeof(Value) > CacheSize)
+        {
+            // a hint is used only if Value is of a certain size
+        }
+    }
 
 ##### Enforcement
 
@@ -3078,12 +3090,13 @@ Such older advice is now obsolete; it does not add value, and it interferes with
 
     const vector<int> fct();    // bad: that "const" is more trouble than it is worth
 
-    vector<int> g(const vector<int>& vx)
+    void g(vector<int>& vx)
     {
         // ...
         fct() = vx;   // prevented by the "const"
         // ...
-        return fct(); // expensive copy: move semantics suppressed by the "const"
+        vx = fct(); // expensive copy: move semantics suppressed by the "const"
+        // ...
     }
 
 The argument for adding `const` to a return value is that it prevents (very rare) accidental access to a temporary.
@@ -5127,6 +5140,7 @@ We can imagine one case where you could want a protected virtual destructor: Whe
 ##### Enforcement
 
 * A class with any virtual functions should have a destructor that is either public and virtual or else protected and non-virtual.
+* If a class inherits publicly from a base class, the base class should have a destructor that is either public and virtual or else protected and non-virtual.
 
 ### <a name="Rc-dtor-fail"></a>C.36: A destructor must not fail
 
@@ -7478,17 +7492,23 @@ Copying a polymorphic class is discouraged due to the slicing problem, see [C.67
 
     class B {
     public:
-        virtual owner<B*> clone() = 0;
         B() = default;
         virtual ~B() = default;
-        B(const B&) = delete;
-        B& operator=(const B&) = delete;
+        virtual gsl::owner<B*> clone() const = 0;
+    protected:
+         B(const B&) = default;
+         B& operator=(const B&) = default;
+         B(B&&) = default;
+         B& operator=(B&&) = default;
+        // ...
     };
 
     class D : public B {
     public:
-        owner<D*> clone() override;
-        ~D() override;
+        gsl::owner<D*> clone() const override
+        {
+            return new D{*this};
+        };
     };
 
 Generally, it is recommended to use smart pointers to represent ownership (see [R.20](#Rr-owner)). However, because of language rules, the covariant return type cannot be a smart pointer: `D::clone` can't return a `unique_ptr<D>` while `B::clone` returns `unique_ptr<B>`. Therefore, you either need to consistently return `unique_ptr<B>` in all overrides, or use `owner<>` utility from the [Guidelines Support Library](#SS-views).
@@ -8061,7 +8081,10 @@ Casting to a reference expresses that you intend to end up with a valid object, 
 
 ##### Example
 
-    ???
+    std::string f(Base& b)
+    {
+        return dynamic_cast<Derived&>(b).to_string();
+    }
 
 ##### Enforcement
 
@@ -8809,12 +8832,12 @@ If you wanted to see the bytes of an `int`, use a (named) cast:
 
     void if_you_must_pun(int& x)
     {
-        auto p = reinterpret_cast<unsigned char*>(&x);
+        auto p = reinterpret_cast<std::byte*>(&x);
         cout << p[0] << '\n';     // OK; better
         // ...
     }
 
-Accessing the result of a `reinterpret_cast` to a type different from the object's declared type is defined behavior. (Using `reinterpret_cast` is discouraged,
+Accessing the result of a `reinterpret_cast` from the object's declared type to `char*`, `unsigned char*`, or `std::byte*` is defined behavior. (Using `reinterpret_cast` is discouraged,
 but at least we can see that something tricky is going on.)
 
 ##### Note
@@ -10201,7 +10224,10 @@ In this case, it might be a good idea to factor out the read:
 
 ##### Reason
 
-Readability. Minimize resource retention.
+Readability.
+Limit the loop variable visibility to the scope of the loop.
+Avoid using the loop variable for other purposes after the loop.
+Minimize resource retention.
 
 ##### Example
 
@@ -10222,10 +10248,23 @@ Readability. Minimize resource retention.
         }
     }
 
+##### Example, don't
+
+    int j;                            // BAD: j is visible outside the loop
+    for (j = 0; j < 100; ++j) {
+        // ...
+    }
+    // j is still visible here and isn't needed
+
+**See also**: [Don't use a variable for two unrelated purposes](#Res-recycle)
+
 ##### Enforcement
 
-* Flag loop variables declared before the loop and not used after the loop
+* Warn when a variable modified inside the `for`-statement is declared outside the loop and not being used outside the loop.
 * (hard) Flag loop variables declared before the loop and used after the loop for an unrelated purpose.
+
+**Discussion**: Scoping the loop variable to the loop body also helps code optimizers greatly. Recognizing that the induction variable
+is only accessible in the loop body unblocks optimizations such as hoisting, strength reduction, loop-invariant code motion, etc.
 
 ##### C++17 and C++20 example
 
@@ -10243,8 +10282,6 @@ Note: C++17 and C++20 also add `if`, `switch`, and range-`for` initializer state
 
 * Flag selection/loop variables declared before the body and not used after the body
 * (hard) Flag selection/loop variables declared before the body and used after the body for an unrelated purpose.
-
-
 
 ### <a name="Res-name-length"></a>ES.7: Keep common and local names short, and keep uncommon and non-local names longer
 
@@ -10444,7 +10481,10 @@ Flag variable and constant declarations with multiple declarators (e.g., `int* p
 
 Consider:
 
-    auto p = v.begin();   // vector<int>::iterator
+    auto p = v.begin();      // vector<DataRecord>::iterator
+    auto z1 = v[3];          // makes copy of DataRecord
+    auto& z2 = v[3];         // avoids copy
+    const auto& z3 = v[3];   // const and avoids copy
     auto h = t.future();
     auto q = make_unique<int[]>(s);
     auto f = [](int x) { return x + 10; };
@@ -10474,7 +10514,9 @@ When concepts become available, we can (and should) be more specific about the t
 
 ##### Example (C++17)
 
-    auto [ quotient, remainder ] = div(123456, 73);   // break out the members of the div_t result
+    std::set<int> values;
+    // ...
+    auto [ position, newly_inserted ] = values.insert(5);   // break out the members of the std::pair
 
 ##### Enforcement
 
@@ -11704,17 +11746,24 @@ A key example is basic narrowing:
 
 The guidelines support library offers a `narrow_cast` operation for specifying that narrowing is acceptable and a `narrow` ("narrow if") that throws an exception if a narrowing would throw away legal values:
 
-    i = narrow_cast<int>(d);   // OK (you asked for it): narrowing: i becomes 7
-    i = narrow<int>(d);        // OK: throws narrowing_error
+    i = gsl::narrow_cast<int>(d);   // OK (you asked for it): narrowing: i becomes 7
+    i = gsl::narrow<int>(d);        // OK: throws narrowing_error
 
 We also include lossy arithmetic casts, such as from a negative floating point type to an unsigned integral type:
 
     double d = -7.9;
     unsigned u = 0;
 
-    u = d;                          // BAD
-    u = narrow_cast<unsigned>(d);   // OK (you asked for it): u becomes 4294967289
-    u = narrow<unsigned>(d);        // OK: throws narrowing_error
+    u = d;                               // bad: narrowing
+    u = gsl::narrow_cast<unsigned>(d);   // OK (you asked for it): u becomes 4294967289
+    u = gsl::narrow<unsigned>(d);        // OK: throws narrowing_error
+
+##### Note
+
+This rule does not apply to [contextual conversions to bool](https://en.cppreference.com/w/cpp/language/implicit_conversion#Contextual_conversions):
+
+    if (ptr) do_something(*ptr);   // OK: ptr is used as a condition
+    bool b = ptr;                  // bad: narrowing
 
 ##### Enforcement
 
@@ -11750,7 +11799,7 @@ Flag uses of `0` and `NULL` for pointers. The transformation might be helped by 
 
 ##### Reason
 
-Casts are a well-known source of errors. Make some optimizations unreliable.
+Casts are a well-known source of errors and make some optimizations unreliable.
 
 ##### Example, bad
 
@@ -12695,39 +12744,7 @@ Flag actions in `for`-initializers and `for`-increments that do not relate to th
 
 ### <a name="Res-for-init"></a>ES.74: Prefer to declare a loop variable in the initializer part of a `for`-statement
 
-##### Reason
-
-Limit the loop variable visibility to the scope of the loop.
-Avoid using the loop variable for other purposes after the loop.
-
-##### Example
-
-    for (int i = 0; i < 100; ++i) {   // GOOD: i var is visible only inside the loop
-        // ...
-    }
-
-##### Example, don't
-
-    int j;                            // BAD: j is visible outside the loop
-    for (j = 0; j < 100; ++j) {
-        // ...
-    }
-    // j is still visible here and isn't needed
-
-**See also**: [Don't use a variable for two unrelated purposes](#Res-recycle)
-
-##### Example
-
-    for (string s; cin >> s; ) {
-        cout << s << '\n';
-    }
-
-##### Enforcement
-
-Warn when a variable modified inside the `for`-statement is declared outside the loop and not being used outside the loop.
-
-**Discussion**: Scoping the loop variable to the loop body also helps code optimizers greatly. Recognizing that the induction variable
-is only accessible in the loop body unblocks optimizations such as hoisting, strength reduction, loop-invariant code motion, etc.
+See [ES.6](#Res-cond)
 
 ### <a name="Res-do"></a>ES.75: Avoid `do`-statements
 
@@ -12809,11 +12826,11 @@ consider `gsl::finally()` as a cleaner and more reliable alternative to `goto ex
     switch(x) {
     case 1 :
         while (/* some condition */) {
-            //...
+            // ...
         break;
-        } //Oops! break switch or break while intended?
+        } // Oops! break switch or break while intended?
     case 2 :
-        //...
+        // ...
         break;
     }
 
@@ -12853,14 +12870,14 @@ Often, a loop that requires a `break` is a good candidate for a function (algori
 
 Often, a loop that uses `continue` can equivalently and as clearly be expressed by an `if`-statement.
 
-    for (int item : vec) { //BAD
+    for (int item : vec) {  // BAD
         if (item%2 == 0) continue;
         if (item == 5) continue;
         if (item > 10) continue;
         /* do something with item */
     }
     
-    for (int item : vec) { //GOOD
+    for (int item : vec) {  // GOOD
         if (item%2 != 0 && item != 5 && item <= 10) {
             /* do something with item */
         }
@@ -12907,6 +12924,7 @@ Multiple case labels of a single statement is OK:
     }
 
 Return statements in a case label are also OK:
+
     switch (x) {
     case 'a':
         return 1;
@@ -12948,7 +12966,7 @@ Flag all implicit fallthroughs from non-empty `case`s.
 
 ##### Example
 
-    enum E { a, b, c , d };
+    enum E { a, b, c, d };
 
     void f1(E x)
     {
@@ -13102,10 +13120,10 @@ Helps make style consistent and conventional.
 By definition, a condition in an `if`-statement, `while`-statement, or a `for`-statement selects between `true` and `false`.
 A numeric value is compared to `0` and a pointer value to `nullptr`.
 
-    // These all mean "if `p` is not `nullptr`"
+    // These all mean "if p is not nullptr"
     if (p) { ... }            // good
-    if (p != 0) { ... }       // redundant `!=0`; bad: don't use 0 for pointers
-    if (p != nullptr) { ... } // redundant `!=nullptr`, not recommended
+    if (p != 0) { ... }       // redundant !=0, bad: don't use 0 for pointers
+    if (p != nullptr) { ... } // redundant !=nullptr, not recommended
 
 Often, `if (p)` is read as "if `p` is valid" which is a direct expression of the programmers intent,
 whereas `if (p != nullptr)` would be a long-winded workaround.
@@ -13162,10 +13180,10 @@ would not in itself save you.
 
 The opposite condition is most easily expressed using a negation:
 
-    // These all mean "if `p` is `nullptr`"
+    // These all mean "if p is nullptr"
     if (!p) { ... }           // good
-    if (p == 0) { ... }       // redundant `== 0`; bad: don't use `0` for pointers
-    if (p == nullptr) { ... } // redundant `== nullptr`, not recommended
+    if (p == 0) { ... }       // redundant == 0, bad: don't use 0 for pointers
+    if (p == nullptr) { ... } // redundant == nullptr, not recommended
 
 ##### Enforcement
 
@@ -14106,7 +14124,7 @@ Unless you do, nothing is guaranteed to work and subtle errors will persist.
 ##### Note
 
 In a nutshell, if two threads can access the same object concurrently (without synchronization), and at least one is a writer (performing a non-`const` operation), you have a data race.
-For further information of how to use synchronization well to eliminate data races, please consult a good book about concurrency.
+For further information of how to use synchronization well to eliminate data races, please consult a good book about concurrency (See [Carefully study the literature](#Rconc-literature)).
 
 ##### Example, bad
 
@@ -15406,7 +15424,7 @@ Become an expert before shipping lock-free code for others to use.
 * Damian Dechev, Peter Pirkelbauer, and Bjarne Stroustrup: Understanding and Effectively Preventing the ABA Problem in Descriptor-based Lock-free Designs. 13th IEEE Computer Society ISORC 2010 Symposium. May 2010.
 * Damian Dechev and Bjarne Stroustrup: Scalable Non-blocking Concurrent Objects for Mission Critical Code. ACM OOPSLA'09. October 2009
 * Damian Dechev, Peter Pirkelbauer, Nicolas Rouquette, and Bjarne Stroustrup: Semantically Enhanced Containers for Concurrent Real-Time Systems. Proc. 16th Annual IEEE International Conference and Workshop on the Engineering of Computer Based Systems (IEEE ECBS). April 2009.
-
+* Maurice Herlihy, Nir Shavit, Victor Luchangco, Michael Spear, "The Art of Multiprocessor Programming", 2nd ed. September 2020
 
 ### <a name="Rconc-double"></a>CP.110: Do not write your own double-checked locking for initialization
 
@@ -15613,7 +15631,7 @@ Error-handling rule summary:
 * [E.12: Use `noexcept` when exiting a function because of a `throw` is impossible or unacceptable](#Re-noexcept)
 * [E.13: Never throw while being the direct owner of an object](#Re-never-throw)
 * [E.14: Use purpose-designed user-defined types as exceptions (not built-in types)](#Re-exception-types)
-* [E.15: Catch exceptions from a hierarchy by reference](#Re-exception-ref)
+* [E.15: Throw by value, catch exceptions from a hierarchy by reference](#Re-exception-ref)
 * [E.16: Destructors, deallocation, and `swap` must never fail](#Re-never-fail)
 * [E.17: Don't try to catch every exception in every function](#Re-not-always)
 * [E.18: Minimize the use of explicit `try`/`catch`](#Re-catch)
@@ -15987,108 +16005,90 @@ Sometimes, [`finally()`](#Re-finally) can make such unsystematic cleanup a bit m
 
 ##### Reason
 
-A user-defined type is unlikely to clash with other people's exceptions.
+A user-defined type can better transmit information about an error to a handler.  Information
+can be encoded into the type itself and the type is unlikely to clash with other people's exceptions.
 
 ##### Example
 
-    void my_code()
+    throw 7; // bad
+
+    throw "something bad";  // bad
+
+    throw std::exception{}; // bad - no info
+
+Deriving from `std::exception` gives the flexibility to catch the specific exception or handle generally through `std::exception`:
+
+    class MyException : public std::runtime_error
     {
+    public:
+        MyException(const string& msg) : std::runtime_error{msg} {}
         // ...
-        throw Moonphase_error{};
-        // ...
-    }
+    };
 
-    void your_code()
-    {
-        try {
-            // ...
-            my_code();
-            // ...
-        }
-        catch(const Bufferpool_exhausted&) {
-            // ...
-        }
-    }
+    // ...
 
-##### Example, don't
+    throw MyException{"something bad"};  // good
 
-    void my_code()     // Don't
-    {
-        // ...
-        throw 7;       // 7 means "moon in the 4th quarter"
-        // ...
-    }
+Exceptions do not need to be derived from `std::exception`:
 
-    void your_code()   // Don't
-    {
-        try {
-            // ...
-            my_code();
-            // ...
-        }
-        catch(int i) {  // i == 7 means "input buffer too small"
-            // ...
-        }
-    }
+    class MyCustomError final {};  // not derived from std::exception
 
-##### Note
+    // ...
 
-The standard-library classes derived from `exception` should be used only as base classes or for exceptions that require only "generic" handling. Like built-in types, their use could clash with other people's use of them.
+    throw MyCustomError{};  // good - handlers must catch this type (or ...)
 
-##### Example, don't
+Library types derived from `std::exception` can be used as generic exceptions if
+no useful information can be added at the point of detection:
 
-    void my_code()   // Don't
-    {
-        // ...
-        throw runtime_error{"moon in the 4th quarter"};
-        // ...
-    }
+    throw std::runtime_error("someting bad"); // good
 
-    void your_code()   // Don't
-    {
-        try {
-            // ...
-            my_code();
-            // ...
-        }
-        catch(const runtime_error&) {   // runtime_error means "input buffer too small"
-            // ...
-        }
-    }
+    // ...
+    
+    throw std::invalid_argument("i is not even"); // good
 
-**See also**: [Discussion](#Sd-???)
+`enum` classes are also allowed:
+
+    enum class alert {RED, YELLOW, GREEN};
+
+    throw alert::RED; // good
 
 ##### Enforcement
 
-Catch `throw` and `catch` of a built-in type. Maybe warn about `throw` and `catch` using a standard-library `exception` type. Obviously, exceptions derived from the `std::exception` hierarchy are fine.
+Catch `throw` of built-in types and `std::exception`.
 
-### <a name="Re-exception-ref"></a>E.15: Catch exceptions from a hierarchy by reference
+### <a name="Re-exception-ref"></a>E.15: Throw by value, catch exceptions from a hierarchy by reference
 
 ##### Reason
 
-To prevent slicing.
+Throwing by value (not by pointer) and catching by reference prevents copying, especially slicing base subobjects.
 
-##### Example
+##### Example; bad
 
     void f()
     {
         try {
             // ...
+            throw new widget{}; // don't: throw by value not by raw pointer
+            // ...
         }
-        catch (exception e) {   // don't: might slice
+        catch (base_class e) {  // don't: might slice
             // ...
         }
     }
 
 Instead, use a reference:
 
-    catch (exception& e) { /* ... */ }
+    catch (base_class& e) { /* ... */ }
 
 or - typically better still - a `const` reference:
 
-    catch (const exception& e) { /* ... */ }
+    catch (const base_class& e) { /* ... */ }
 
 Most handlers do not modify their exception and in general we [recommend use of `const`](#Res-const).
+
+##### Note
+
+Catch by value can be appropriate for a small value type such as an `enum` value.
 
 ##### Note
 
@@ -16096,7 +16096,8 @@ To rethrow a caught exception use `throw;` not `throw e;`. Using `throw e;` woul
 
 ##### Enforcement
 
-Flag by-value exceptions if their types are part of a hierarchy (could require whole-program analysis to be perfect).
+* Flag catching by value of a type that has a virtual function.
+* Flag throwing raw pointers.
 
 ### <a name="Re-never-fail"></a>E.16: Destructors, deallocation, and `swap` must never fail
 
@@ -17467,7 +17468,7 @@ The rule supports the view that a concept should reflect a (mathematically) cohe
     // ... and the other comparison operators ...
 
     Minimal operator+(const Convenient&, const Convenient&);
-    // .. and the other arithmetic operators ...
+    // ... and the other arithmetic operators ...
 
     void f(const Convenient& x, const Convenient& y)
     {
@@ -17938,14 +17939,14 @@ Most uses support that anyway.
         explicit X(int);
         X(const X&);            // copy
         X operator=(const X&);
-        X(X&&) noexcept;                 // move
+        X(X&&) noexcept;        // move
         X& operator=(X&&) noexcept;
         ~X();
         // ... no more constructors ...
     };
 
-    X x {1};    // fine
-    X y = x;      // fine
+    X x {1};              // fine
+    X y = x;              // fine
     std::vector<X> v(10); // error: no default constructor
 
 ##### Note
@@ -18369,7 +18370,7 @@ There are three major ways to let calling code customize a template.
     void test2(T t)
         // Call a non-member function without qualification
     {
-        f(t);  // require f(/*T*/) be available in caller's scope or in T's namespace
+        f(t);     // require f(/*T*/) be available in caller's scope or in T's namespace
     }
 
     template<class T>
@@ -18968,7 +18969,7 @@ You can't partially specialize a function template per language rules. You can f
 
 ##### Reason
 
-If you intend for a class to match a concept, verifying that early saves users pain.
+If you intend for a class to match a concept, verifying that early saves users' pain.
 
 ##### Example
 
@@ -19507,7 +19508,7 @@ For example:
     #include <random>
     #include <vector>
 
-a user can now get that set of declarations with a single `#include`"
+a user can now get that set of declarations with a single `#include`
 
     #include "basic_std_lib.h"
 
@@ -19733,7 +19734,7 @@ For a variable-length array, use `std::vector`, which additionally can change it
 
     int v[SIZE];                        // BAD
 
-    std::array<int, SIZE> w;             // ok
+    std::array<int, SIZE> w;            // ok
 
 ##### Example
 
@@ -21186,8 +21187,8 @@ A `char*` that points to more than one `char` but is not a C-style string (e.g.,
 * `czstring`   // a `const char*` supposed to be a C-style string; that is, a zero-terminated sequence of `const` `char` or `nullptr`
 
 Logically, those last two aliases are not needed, but we are not always logical, and they make the distinction between a pointer to one `char` and a pointer to a C-style string explicit.
-A sequence of characters that is not assumed to be zero-terminated should be a `char*`, rather than a `zstring`.
-French accent optional.
+A sequence of characters that is not assumed to be zero-terminated should be a `span<char>`, or if that is impossible because of ABI issues a `char*`, rather than a `zstring`.
+
 
 Use `not_null<zstring>` for C-style strings that cannot be `nullptr`. ??? Do we need a name for `not_null<zstring>`? or is its ugliness a feature?
 
@@ -21904,7 +21905,7 @@ This section covers answers to frequently asked questions about these guidelines
 
 ### <a name="Faq-aims"></a>FAQ.1: What do these guidelines aim to achieve?
 
-See the <a href="#S-abstract">top of this page</a>. This is an open-source project to maintain modern authoritative guidelines for writing C++ code using the current C++ Standard (as of this writing, C++14). The guidelines are designed to be modern, machine-enforceable wherever possible, and open to contributions and forking so that organizations can easily incorporate them into their own corporate coding guidelines.
+See the <a href="#S-abstract">top of this page</a>. This is an open-source project to maintain modern authoritative guidelines for writing C++ code using the current C++ Standard. The guidelines are designed to be modern, machine-enforceable wherever possible, and open to contributions and forking so that organizations can easily incorporate them into their own corporate coding guidelines.
 
 ### <a name="Faq-announced"></a>FAQ.2: When and where was this work first announced?
 
@@ -21932,11 +21933,11 @@ Because `isocpp` is the Standard C++ Foundation; the committee's repositories ar
 
 ### <a name="Faq-cpp98"></a>FAQ.8: Will there be a C++98 version of these Guidelines? a C++11 version?
 
-No. These guidelines are about how to best use Standard C++14 (and, if you have an implementation available, the Concepts Technical Specification) and write code assuming you have a modern conforming compiler.
+No. These guidelines are about how to best use modern standard C++ and write code assuming you have a modern conforming compiler.
 
 ### <a name="Faq-language-extensions"></a>FAQ.9: Do these guidelines propose new language features?
 
-No. These guidelines are about how to best use Standard C++14 + the Concepts Technical Specification, and they limit themselves to recommending only those features.
+No. These guidelines are about how to best use modern Standard C++, and they limit themselves to recommending only those features.
 
 ### <a name="Faq-markdown"></a>FAQ.10: What version of Markdown do these guidelines use?
 
@@ -22283,7 +22284,7 @@ Never allow an error to be reported from a destructor, a resource deallocation f
 
         void test()
         {
-            std::array<Nefarious, 10> arr; // this line can std::terminate(!)
+            std::array<Nefarious, 10> arr; // this line can std::terminate()
         }
 
     The behavior of arrays is undefined in the presence of destructors that throw because there is no reasonable rollback behavior that could ever be devised. Just think: What code can the compiler generate for constructing an `arr` where, if the fourth object's constructor throws, the code has to give up and in its cleanup mode tries to call the destructors of the already-constructed objects ... and one or more of those destructors throws? There is no satisfactory answer.
